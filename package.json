@@ -6,8 +6,15 @@
   "scripts": {
     "test": "tap",
     "test:coverage": "tap --coverage-report=html",
+    "test:integration": "tap tests/integration.test.js",
     "lint": "standard",
-    "lint:fix": "standard --fix"
+    "lint:fix": "standard --fix",
+    "couchbase:start": "docker-compose up -d",
+    "couchbase:setup": "docker-compose exec couchbase /bin/bash -c 'cd /tmp && bash' < scripts/setup-couchbase.sh || docker exec couchbase-test bash /tmp/setup.sh",
+    "couchbase:init": "docker cp scripts/setup-couchbase.sh couchbase-test:/tmp/setup.sh && docker exec couchbase-test bash /tmp/setup.sh",
+    "couchbase:stop": "docker-compose down",
+    "couchbase:clean": "docker-compose down -v",
+    "couchbase:logs": "docker-compose logs -f couchbase"
   },
   "keywords": [
     "couchbase",

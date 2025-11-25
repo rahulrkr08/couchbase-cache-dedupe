@@ -12,6 +12,8 @@ Couchbase storage adapter for [async-cache-dedupe](https://github.com/mcollina/a
 - ✅ Reference-based cache invalidation
 - ✅ Wildcard pattern matching for bulk invalidation
 - ✅ Support for both Couchbase Collection and Bucket APIs
+- ✅ **Automatic key hashing for long keys** (handles Couchbase 250-byte key limit)
+- ✅ **Docker development environment included**
 - ✅ Comprehensive error handling and logging
 - ✅ 100% test coverage
 - ✅ Pure JavaScript implementation (no TypeScript compilation needed)
@@ -186,6 +188,8 @@ new CouchbaseStorage(options)
 
 - `collection` (Object, required if `bucket` not provided): Couchbase collection instance
 - `bucket` (Object, required if `collection` not provided): Couchbase bucket instance
+- `useHashKeys` (Boolean, default: true): Enable automatic key hashing for long keys
+- `maxKeyLength` (Number, default: 200): Maximum key length before hashing (bytes)
 - `invalidation` (Object, optional): Invalidation configuration
   - `referencesTTL` (Number, default: 60): TTL for reference keys in seconds
 - `log` (Object, optional): Pino-compatible logger instance
@@ -435,17 +439,89 @@ async function main() {
 main().catch(console.error)
 ```
 
+## Key Hashing
+
+Couchbase has a 250-byte limit on key length. This adapter automatically hashes long keys using SHA-256 to stay within the limit:
+
+- Keys shorter than `maxKeyLength` (default: 200 bytes) are stored as-is
+- Keys longer than `maxKeyLength` are hashed using SHA-256
+- Hashing can be disabled with `useHashKeys: false` (not recommended)
+- Default `maxKeyLength` is 200 bytes (leaving room for prefixes)
+
+```javascript
+const storage = new CouchbaseStorage({
+  collection,
+  maxKeyLength: 150,  // Customize the threshold
+  useHashKeys: true   // Enable hashing (default)
+})
+```
+
+This ensures your application works correctly even with very long cache keys, without manual key management.
+
+## Development Setup
+
+This package includes a complete Docker-based development environment for Couchbase.
+
+### Starting Couchbase with Docker
+
+```bash
+# Start Couchbase container
+npm run couchbase:start
+
+# Initialize Couchbase (create bucket, scope, collection, authentication)
+npm run couchbase:init
+
+# View Couchbase logs
+npm run couchbase:logs
+
+# Stop Couchbase
+npm run couchbase:stop
+
+# Clean up (removes all data)
+npm run couchbase:clean
+```
+
+### Default Configuration
+
+The setup script creates the following:
+- **Host**: localhost:8091
+- **Username**: Administrator
+- **Password**: password
+- **Bucket**: test-bucket
+- **Scope**: test-scope
+- **Collection**: test-collection
+
+Access the Couchbase Web Console at http://localhost:8091
+
+### Custom Configuration
+
+You can customize the setup by setting environment variables:
+
+```bash
+CB_HOST=localhost \
+CB_PORT=8091 \
+CB_ADMIN=admin \
+CB_PASSWORD=mypassword \
+CB_BUCKET=my-bucket \
+CB_SCOPE=my-scope \
+CB_COLLECTION=my-collection \
+npm run couchbase:init
+```
+
 ## Testing
 
 Run the test suite:
 
 ```bash
+# Run unit tests (no Couchbase required)
 npm test
-```
 
-Run tests with coverage:
+# Run integration tests (requires Couchbase)
+npm run couchbase:start
+npm run couchbase:init
+npm run test:integration
 
-```bash
+# Run tests with coverage
 npm run test:coverage
 ```
 
@@ -454,8 +530,9 @@ The package includes comprehensive tests with 100% code coverage, covering:
 - TTL handling and expiration
 - Reference-based invalidation
 - Wildcard pattern matching
+- Key hashing for long keys
 - Error handling and edge cases
-- Integration with async-cache-dedupe
+- Integration with async-cache-dedupe and real Couchbase
 
 ## Error Handling
 

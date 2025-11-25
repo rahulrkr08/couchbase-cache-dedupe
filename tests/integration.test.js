@@ -3,62 +3,64 @@
 const { test } = require('tap')
 const { createCache, createStorage } = require('async-cache-dedupe')
 const { CouchbaseStorage } = require('../index')
+const couchbase = require('couchbase')
 
-// Mock Couchbase collection
-class MockCollection {
-  constructor () {
-    this.data = new Map()
-    this.name = 'testCollection'
-    this.scope = {
-      name: 'testScope',
-      bucket: {
-        name: 'testBucket',
-        cluster: {
-          query: async (queryString) => {
-            const rows = []
-            for (const [key] of this.data.entries()) {
-              if (key.startsWith('ref:')) {
-                rows.push({ id: key })
-              }
-            }
-            return { rows }
-          }
-        }
+// Configuration from environment variables
+const CB_HOST = process.env.CB_HOST || 'localhost'
+const CB_USER = process.env.CB_ADMIN || 'Administrator'
+const CB_PASSWORD = process.env.CB_PASSWORD || 'password'
+const CB_BUCKET = process.env.CB_BUCKET || 'test-bucket'
+const CB_SCOPE = process.env.CB_SCOPE || 'test-scope'
+const CB_COLLECTION = process.env.CB_COLLECTION || 'test-collection'
+
+let cluster
+let bucket
+let collection
+
+// Setup connection before tests
+test.before(async () => {
+  try {
+    console.log(`Connecting to Couchbase at ${CB_HOST}...`)
+    cluster = await couchbase.connect(`couchbase://${CB_HOST}`, {
+      username: CB_USER,
+      password: CB_PASSWORD,
+      timeouts: {
+        kvTimeout: 10000,
+        queryTimeout: 10000
       }
-    }
-  }
+    })
 
-  async get (key) {
-    if (this.data.has(key)) {
-      return { content: this.data.get(key) }
-    }
-    const error = new Error('Document not found')
-    error.name = 'DocumentNotFoundError'
+    bucket = cluster.bucket(CB_BUCKET)
+    const scope = bucket.scope(CB_SCOPE)
+    collection = scope.collection(CB_COLLECTION)
+
+    console.log('Connected to Couchbase successfully!')
+  } catch (error) {
+    console.error('Failed to connect to Couchbase:', error.message)
+    console.error('Make sure Couchbase is running and initialized:')
+    console.error('  npm run couchbase:start')
+    console.error('  npm run couchbase:init')
     throw error
   }
+})
 
-  async upsert (key, value, options = {}) {
-    this.data.set(key, value)
+// Cleanup after all tests
+test.teardown(async () => {
+  if (cluster) {
+    await cluster.close()
   }
-
-  async remove (key) {
-    if (!this.data.has(key)) {
-      const error = new Error('Document not found')
-      error.name = 'DocumentNotFoundError'
-      throw error
-    }
-    this.data.delete(key)
-  }
-
-  clear () {
-    this.data.clear()
-  }
-}
+})
 
 test('Integration with async-cache-dedupe', async (t) => {
   t.test('should work with createStorage and createCache', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors if no documents exist
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
@@ -99,8 +101,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should handle cache invalidation by reference', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
@@ -142,8 +150,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should handle wildcard invalidation', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
@@ -189,8 +203,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should handle multiple references per entry', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
@@ -245,8 +265,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should handle cache.clear()', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({ collection })
     })
@@ -280,8 +306,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should support deduplication', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({ collection })
     })
@@ -319,13 +351,19 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should work with bucket option', async (t) => {
-    const collection = new MockCollection()
-    const bucket = {
-      defaultCollection: () => collection
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
     }
-    
+
+    // Use the default collection for this test
+    const defaultCollection = bucket.defaultCollection()
+
     const storage = createStorage('custom', {
-      storage: new CouchbaseStorage({ bucket })
+      storage: new CouchbaseStorage({ collection: defaultCollection })
     })
 
     const cache = createCache({
@@ -352,8 +390,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should handle TTL correctly', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({ collection })
     })
@@ -390,8 +434,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   })
 
   t.test('should handle array of references for invalidation', async (t) => {
-    const collection = new MockCollection()
-    
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
@@ -427,5 +477,49 @@ test('Integration with async-cache-dedupe', async (t) => {
     await cache.fetchUser(1)
     await cache.fetchUser(2)
     t.equal(callCount, 4)
+  })
+
+  t.test('should handle long keys with hash generation', async (t) => {
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors
+    }
+
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({
+        collection,
+        maxKeyLength: 50 // Set a low limit to trigger hashing
+      })
+    })
+
+    const cache = createCache({
+      ttl: 60,
+      storage: {
+        type: 'custom',
+        options: { storage }
+      }
+    })
+
+    let callCount = 0
+    cache.define('fetchData', async (id) => {
+      callCount++
+      return { id, data: `Data for ${id}` }
+    })
+
+    // Create a very long key that exceeds the limit
+    const longKey = 'x'.repeat(100)
+
+    // First call should execute the function
+    const result1 = await cache.fetchData(longKey)
+    t.same(result1, { id: longKey, data: `Data for ${longKey}` })
+    t.equal(callCount, 1)
+
+    // Second call should use cache (proving hash worked)
+    const result2 = await cache.fetchData(longKey)
+    t.same(result2, { id: longKey, data: `Data for ${longKey}` })
+    t.equal(callCount, 1, 'Should use cached value with hashed key')
   })
 })

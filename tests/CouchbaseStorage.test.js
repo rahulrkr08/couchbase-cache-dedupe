@@ -136,7 +136,7 @@ describe('CouchbaseStorage', () => {
     it('should store value with references', async () => {
       const value = { data: 'test' }
       const references = ['user:1', 'user:2']
-      
+
       mockCollection.get.mock.mockImplementation(async (key) => {
         throw { name: 'DocumentNotFoundError' }
       })
@@ -145,7 +145,7 @@ describe('CouchbaseStorage', () => {
 
       // Should store the main document + 2 reference documents
       assert.strictEqual(mockCollection.upsert.mock.calls.length, 3)
-      
+
       // Check main document
       const [mainKey, mainDoc, mainOptions] = mockCollection.upsert.mock.calls[0].arguments
       assert.strictEqual(mainKey, 'v:test-key')
@@ -294,7 +294,7 @@ describe('CouchbaseStorage', () => {
       mockCollection.get.mock.mockImplementation(async () => ({
         content: { value: 'test', references: [] }
       }))
-      
+
       mockCollection.remove.mock.mockImplementation(async () => {
         throw new Error('Connection error')
       })
@@ -406,7 +406,7 @@ describe('CouchbaseStorage', () => {
     it('should handle non-default scope and collection in wildcard query', async () => {
       mockScope.name = 'custom-scope'
       mockCollection.name = 'custom-collection'
-      
+
       mockCluster.query.mock.mockImplementation(async (query) => {
         assert(query.includes('`test-bucket`.`custom-scope`.`custom-collection`'))
         return { rows: [] }
@@ -639,6 +639,73 @@ describe('CouchbaseStorage', () => {
       const key = storage._getReferenceKey('user:1')
       assert.strictEqual(key, 'r:user:1')
     })
+
+    it('should hash long keys that exceed maxKeyLength', () => {
+      const storage = new CouchbaseStorage({
+        collection: mockCollection,
+        maxKeyLength: 10
+      })
+
+      const longKey = 'this-is-a-very-long-key-that-exceeds-the-limit'
+      const hashedKey = storage._getValueKey(longKey)
+
+      // Should be hashed (SHA-256 hex = 64 chars + prefix)
+      assert.strictEqual(hashedKey.length, 66) // 'v:' + 64 char hash
+      assert(hashedKey.startsWith('v:'))
+    })
+
+    it('should not hash short keys', () => {
+      const storage = new CouchbaseStorage({
+        collection: mockCollection,
+        maxKeyLength: 100
+      })
+
+      const shortKey = 'short'
+      const key = storage._getValueKey(shortKey)
+
+      assert.strictEqual(key, 'v:short')
+    })
+
+    it('should allow disabling hash keys', () => {
+      const storage = new CouchbaseStorage({
+        collection: mockCollection,
+        useHashKeys: false,
+        maxKeyLength: 10
+      })
+
+      const longKey = 'this-is-a-very-long-key'
+      const key = storage._getValueKey(longKey)
+
+      // Should NOT be hashed when useHashKeys is false
+      assert.strictEqual(key, `v:${longKey}`)
+    })
+
+    it('should generate consistent hashes for same key', () => {
+      const storage = new CouchbaseStorage({
+        collection: mockCollection,
+        maxKeyLength: 10
+      })
+
+      const longKey = 'this-is-a-very-long-key'
+      const hash1 = storage._getValueKey(longKey)
+      const hash2 = storage._getValueKey(longKey)
+
+      assert.strictEqual(hash1, hash2)
+    })
+
+    it('should hash long reference keys', () => {
+      const storage = new CouchbaseStorage({
+        collection: mockCollection,
+        maxKeyLength: 10
+      })
+
+      const longRef = 'this-is-a-very-long-reference-key'
+      const hashedRef = storage._getReferenceKey(longRef)
+
+      // Should be hashed (SHA-256 hex = 64 chars + prefix)
+      assert.strictEqual(hashedRef.length, 66) // 'r:' + 64 char hash
+      assert(hashedRef.startsWith('r:'))
+    })
   })
 
   describe('integration scenarios', () => {
@@ -649,7 +716,7 @@ describe('CouchbaseStorage', () => {
     it('should handle complete cache lifecycle', async () => {
       // Setup
       const documents = new Map()
-      
+
       mockCollection.get.mock.mockImplementation(async (key) => {
         if (documents.has(key)) {
           return { content: documents.get(key) }
@@ -684,7 +751,7 @@ describe('CouchbaseStorage', () => {
 
     it('should handle multiple keys with same reference', async () => {
       const documents = new Map()
-      
+
       mockCollection.get.mock.mockImplementation(async (key) => {
         if (documents.has(key)) {
           return { content: documents.get(key) }
