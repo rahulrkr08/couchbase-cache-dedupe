@@ -188,8 +188,6 @@ new CouchbaseStorage(options)
 
 - `collection` (Object, required if `bucket` not provided): Couchbase collection instance
 - `bucket` (Object, required if `collection` not provided): Couchbase bucket instance
-- `useHashKeys` (Boolean, default: true): Enable automatic key hashing for long keys
-- `maxKeyLength` (Number, default: 200): Maximum key length before hashing (bytes)
 - `invalidation` (Object, optional): Invalidation configuration
   - `referencesTTL` (Number, default: 60): TTL for reference keys in seconds
 - `log` (Object, optional): Pino-compatible logger instance
@@ -439,24 +437,16 @@ async function main() {
 main().catch(console.error)
 ```
 
-## Key Hashing
+## Automatic Key Hashing
 
-Couchbase has a 250-byte limit on key length. This adapter automatically hashes long keys using SHA-256 to stay within the limit:
+Couchbase has a 250-byte limit on key length. This adapter **automatically handles this limitation** by hashing long keys using SHA-256:
 
-- Keys shorter than `maxKeyLength` (default: 200 bytes) are stored as-is
-- Keys longer than `maxKeyLength` are hashed using SHA-256
-- Hashing can be disabled with `useHashKeys: false` (not recommended)
-- Default `maxKeyLength` is 200 bytes (leaving room for prefixes)
+- Keys shorter than 200 bytes are stored as-is for better readability in Couchbase UI
+- Keys longer than 200 bytes are automatically hashed using SHA-256 (64-character hex string)
+- Hashing is completely transparent - you don't need to configure or manage it
+- The same key always produces the same hash, ensuring cache consistency
 
-```javascript
-const storage = new CouchbaseStorage({
-  collection,
-  maxKeyLength: 150,  // Customize the threshold
-  useHashKeys: true   // Enable hashing (default)
-})
-```
-
-This ensures your application works correctly even with very long cache keys, without manual key management.
+**You don't need to do anything** - the adapter handles this automatically. This ensures your application works correctly even with very long cache keys, without any manual key management.
 
 ## Development Setup
 

@@ -640,13 +640,13 @@ describe('CouchbaseStorage', () => {
       assert.strictEqual(key, 'r:user:1')
     })
 
-    it('should hash long keys that exceed maxKeyLength', () => {
+    it('should automatically hash long keys that exceed 200 bytes', () => {
       const storage = new CouchbaseStorage({
-        collection: mockCollection,
-        maxKeyLength: 10
+        collection: mockCollection
       })
 
-      const longKey = 'this-is-a-very-long-key-that-exceeds-the-limit'
+      // Create a key longer than 200 bytes
+      const longKey = 'x'.repeat(250)
       const hashedKey = storage._getValueKey(longKey)
 
       // Should be hashed (SHA-256 hex = 64 chars + prefix)
@@ -654,52 +654,39 @@ describe('CouchbaseStorage', () => {
       assert(hashedKey.startsWith('v:'))
     })
 
-    it('should not hash short keys', () => {
+    it('should not hash short keys (under 200 bytes)', () => {
       const storage = new CouchbaseStorage({
-        collection: mockCollection,
-        maxKeyLength: 100
+        collection: mockCollection
       })
 
       const shortKey = 'short'
       const key = storage._getValueKey(shortKey)
 
+      // Short keys should remain as-is
       assert.strictEqual(key, 'v:short')
-    })
-
-    it('should allow disabling hash keys', () => {
-      const storage = new CouchbaseStorage({
-        collection: mockCollection,
-        useHashKeys: false,
-        maxKeyLength: 10
-      })
-
-      const longKey = 'this-is-a-very-long-key'
-      const key = storage._getValueKey(longKey)
-
-      // Should NOT be hashed when useHashKeys is false
-      assert.strictEqual(key, `v:${longKey}`)
     })
 
     it('should generate consistent hashes for same key', () => {
       const storage = new CouchbaseStorage({
-        collection: mockCollection,
-        maxKeyLength: 10
+        collection: mockCollection
       })
 
-      const longKey = 'this-is-a-very-long-key'
+      // Use a key longer than 200 bytes to trigger hashing
+      const longKey = 'x'.repeat(250)
       const hash1 = storage._getValueKey(longKey)
       const hash2 = storage._getValueKey(longKey)
 
+      // Same key should always produce same hash
       assert.strictEqual(hash1, hash2)
     })
 
-    it('should hash long reference keys', () => {
+    it('should automatically hash long reference keys', () => {
       const storage = new CouchbaseStorage({
-        collection: mockCollection,
-        maxKeyLength: 10
+        collection: mockCollection
       })
 
-      const longRef = 'this-is-a-very-long-reference-key'
+      // Create a reference key longer than 200 bytes
+      const longRef = 'y'.repeat(250)
       const hashedRef = storage._getReferenceKey(longRef)
 
       // Should be hashed (SHA-256 hex = 64 chars + prefix)

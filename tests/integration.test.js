@@ -479,7 +479,7 @@ test('Integration with async-cache-dedupe', async (t) => {
     t.equal(callCount, 4)
   })
 
-  t.test('should handle long keys with hash generation', async (t) => {
+  t.test('should automatically handle long keys with hash generation', async (t) => {
     // Clear any existing data
     try {
       const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
@@ -490,8 +490,7 @@ test('Integration with async-cache-dedupe', async (t) => {
 
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
-        collection,
-        maxKeyLength: 50 // Set a low limit to trigger hashing
+        collection
       })
     })
 
@@ -509,17 +508,17 @@ test('Integration with async-cache-dedupe', async (t) => {
       return { id, data: `Data for ${id}` }
     })
 
-    // Create a very long key that exceeds the limit
-    const longKey = 'x'.repeat(100)
+    // Create a very long key (over 200 bytes) that will be automatically hashed
+    const longKey = 'x'.repeat(250)
 
     // First call should execute the function
     const result1 = await cache.fetchData(longKey)
     t.same(result1, { id: longKey, data: `Data for ${longKey}` })
     t.equal(callCount, 1)
 
-    // Second call should use cache (proving hash worked)
+    // Second call should use cache (proving automatic hash worked)
     const result2 = await cache.fetchData(longKey)
     t.same(result2, { id: longKey, data: `Data for ${longKey}` })
-    t.equal(callCount, 1, 'Should use cached value with hashed key')
+    t.equal(callCount, 1, 'Should use cached value with automatically hashed key')
   })
 })
