@@ -1,0 +1,44 @@
+{
+  "name": "couchbase-cache-dedupe",
+  "version": "1.0.0",
+  "description": "Couchbase storage adapter for async-cache-dedupe",
+  "main": "index.js",
+  "scripts": {
+    "test": "tap",
+    "test:coverage": "tap --coverage-report=html",
+    "lint": "standard",
+    "lint:fix": "standard --fix"
+  },
+  "keywords": [
+    "couchbase",
+    "cache",
+    "async-cache-dedupe",
+    "storage",
+    "adapter",
+    "deduplication"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/couchbase-cache-dedupe.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/couchbase-cache-dedupe/issues"
+  },
+  "homepage": "https://github.com/yourusername/couchbase-cache-dedupe#readme",
+  "dependencies": {
+    "async-cache-dedupe": "^2.2.0"
+  },
+  "peerDependencies": {
+    "couchbase": "^4.0.0"
+  },
+  "devDependencies": {
+    "couchbase": "^4.0.0",
+    "standard": "^17.1.0",
+    "tap": "^18.0.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
