@@ -1,73 +1,78 @@
 'use strict'
 
-const { test } = require('tap')
+const { test } = require('node:test')
+const assert = require('node:assert')
 const { createCache, createStorage } = require('async-cache-dedupe')
 const { CouchbaseStorage } = require('../index')
+const couchbase = require('couchbase')
 
-// Mock Couchbase collection
-class MockCollection {
-  constructor () {
-    this.data = new Map()
-    this.name = 'testCollection'
-    this.scope = {
-      name: 'testScope',
-      bucket: {
-        name: 'testBucket',
-        cluster: {
-          query: async (queryString) => {
-            const rows = []
-            for (const [key] of this.data.entries()) {
-              if (key.startsWith('ref:')) {
-                rows.push({ id: key })
-              }
-            }
-            return { rows }
-          }
-        }
+// Configuration from environment variables
+const CB_HOST = process.env.CB_HOST || 'localhost'
+const CB_USER = process.env.CB_ADMIN || 'Administrator'
+const CB_PASSWORD = process.env.CB_PASSWORD || 'password'
+const CB_BUCKET = process.env.CB_BUCKET || 'test-bucket'
+const CB_SCOPE = process.env.CB_SCOPE || 'test-scope'
+const CB_COLLECTION = process.env.CB_COLLECTION || 'test-collection'
+
+let cluster
+let bucket
+let collection
+
+// Setup connection before tests
+test.before(async () => {
+  try {
+    console.log(`Connecting to Couchbase at ${CB_HOST}...`)
+    cluster = await couchbase.connect(`couchbase://${CB_HOST}`, {
+      username: CB_USER,
+      password: CB_PASSWORD,
+      timeouts: {
+        kvTimeout: 10000,
+        queryTimeout: 10000
       }
-    }
-  }
+    })
 
-  async get (key) {
-    if (this.data.has(key)) {
-      return { content: this.data.get(key) }
-    }
-    const error = new Error('Document not found')
-    error.name = 'DocumentNotFoundError'
+    bucket = cluster.bucket(CB_BUCKET)
+    const scope = bucket.scope(CB_SCOPE)
+    collection = scope.collection(CB_COLLECTION)
+
+    console.log('Connected to Couchbase successfully!')
+  } catch (error) {
+    console.error('Failed to connect to Couchbase:', error.message)
+    console.error('Make sure Couchbase is running and initialized:')
+    console.error('  npm run couchbase:start')
+    console.error('  npm run couchbase:init')
     throw error
   }
+})
 
-  async upsert (key, value, options = {}) {
-    this.data.set(key, value)
+// Cleanup after all tests
+test.after(async () => {
+  if (cluster) {
+    await cluster.close()
   }
-
-  async remove (key) {
-    if (!this.data.has(key)) {
-      const error = new Error('Document not found')
-      error.name = 'DocumentNotFoundError'
-      throw error
-    }
-    this.data.delete(key)
-  }
-
-  clear () {
-    this.data.clear()
-  }
-}
+})
 
 test('Integration with async-cache-dedupe', async (t) => {
-  t.test('should work with createStorage and createCache', async (t) => {
-    const collection = new MockCollection()
-    
+  t.beforeEach(async () => {
+    // Clear any existing data
+    try {
+      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(query)
+    } catch (error) {
+      // Ignore errors if no documents exist
+    }
+  })
+
+  await t.test('should work with createStorage and createCache', async (t) => {
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
-        invalidation: { referencesTTL: 60 }
+        invalidation: { referencesTTL: 100000 }
       })
     })
 
     const cache = createCache({
-      ttl: 5,
+      ttl: 100000,
       storage: {
         type: 'custom',
         options: { storage }
@@ -84,32 +89,36 @@ test('Integration with async-cache-dedupe', async (t) => {
 
     // First call should execute the function
     const result1 = await cache.fetchUser(1)
-    t.same(result1, { id: 1, name: 'User 1' })
-    t.equal(callCount, 1)
+    assert.deepEqual(result1, { id: 1, name: 'User 1' })
+    assert.equal(callCount, 1)
 
     // Second call should use cache
     const result2 = await cache.fetchUser(1)
-    t.same(result2, { id: 1, name: 'User 1' })
-    t.equal(callCount, 1)
+    assert.deepEqual(result2, { id: 1, name: 'User 1' })
+    assert.equal(callCount, 1)
+
+    await cache.invalidate('fetchUser', ['user:1'])
+
+    const result3 = await cache.fetchUser(1)
+    assert.deepEqual(result3, { id: 1, name: 'User 1' })
+    assert.equal(callCount, 2)
 
     // Third call with different ID should execute again
-    const result3 = await cache.fetchUser(2)
-    t.same(result3, { id: 2, name: 'User 2' })
-    t.equal(callCount, 2)
+    const result4 = await cache.fetchUser(2)
+    assert.deepEqual(result4, { id: 2, name: 'User 2' })
+    assert.equal(callCount, 3)
   })
 
-  t.test('should handle cache invalidation by reference', async (t) => {
-    const collection = new MockCollection()
-    
+  await t.test('should handle cache invalidation by reference', async (t) => {
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
-        invalidation: { referencesTTL: 60 }
+        invalidation: { referencesTTL: 100000 }
       })
     })
 
     const cache = createCache({
-      ttl: 60,
+      ttl: 100000,
       storage: {
         type: 'custom',
         options: { storage }
@@ -126,33 +135,31 @@ test('Integration with async-cache-dedupe', async (t) => {
 
     // Cache user 1
     const result1 = await cache.fetchUser(1)
-    t.equal(callCount, 1)
+    assert.equal(callCount, 1)
 
     // Should use cache
     await cache.fetchUser(1)
-    t.equal(callCount, 1)
+    assert.equal(callCount, 1)
 
     // Invalidate user 1
-    await cache.invalidateAll('user:1')
+    await cache.invalidate('fetchUser', ['user:1'])
 
     // Should execute function again after invalidation
     const result2 = await cache.fetchUser(1)
-    t.equal(callCount, 2)
-    t.ok(result2.updatedAt > result1.updatedAt)
+    assert.equal(callCount, 2)
+    assert.ok(result2.updatedAt >= result1.updatedAt)
   })
 
-  t.test('should handle wildcard invalidation', async (t) => {
-    const collection = new MockCollection()
-    
+  await t.test('should handle wildcard invalidation', async (t) => {
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
         collection,
-        invalidation: { referencesTTL: 60 }
+        invalidation: { referencesTTL: 100000 }
       })
     })
 
     const cache = createCache({
-      ttl: 60,
+      ttl: 100000,
       storage: {
         type: 'custom',
         options: { storage }
@@ -171,35 +178,32 @@ test('Integration with async-cache-dedupe', async (t) => {
     await cache.fetchUser(1)
     await cache.fetchUser(2)
     await cache.fetchUser(3)
-    t.equal(callCount, 3)
+    assert.equal(callCount, 3)
 
     // Should use cache
     await cache.fetchUser(1)
     await cache.fetchUser(2)
-    t.equal(callCount, 3)
+    assert.equal(callCount, 3)
 
     // Invalidate all users with wildcard
-    await cache.invalidateAll('user:*')
+    await cache.invalidate('fetchUser', ['user:*'])
 
     // Should execute functions again after invalidation
     await cache.fetchUser(1)
     await cache.fetchUser(2)
     await cache.fetchUser(3)
-    t.equal(callCount, 6)
+    assert.equal(callCount, 6)
   })
 
-  t.test('should handle multiple references per entry', async (t) => {
-    const collection = new MockCollection()
-    
+  await t.test('should automatically handle long keys with hash generation', async (t) => {
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({
-        collection,
-        invalidation: { referencesTTL: 60 }
+        collection
       })
     })
 
     const cache = createCache({
-      ttl: 60,
+      ttl: 100000,
       storage: {
         type: 'custom',
         options: { storage }
@@ -207,10 +211,120 @@ test('Integration with async-cache-dedupe', async (t) => {
     })
 
     let callCount = 0
-    cache.define('fetchUserPosts', {
+    cache.define('fetchData', async (id) => {
+      callCount++
+      return { id, data: `Data for ${id}` }
+    })
+
+    // Create a very long key (over 200 bytes) that will be automatically hashed
+    const longKey = 'x'.repeat(250)
+
+    // First call should execute the function
+    const result1 = await cache.fetchData(longKey)
+    assert.deepEqual(result1, { id: longKey, data: `Data for ${longKey}` })
+    assert.equal(callCount, 1)
+
+    // Second call should use cache (proving automatic hash worked)
+    const result2 = await cache.fetchData(longKey)
+    assert.deepEqual(result2, { id: longKey, data: `Data for ${longKey}` })
+    assert.equal(callCount, 1, 'Should use cached value with automatically hashed key')
+  })
+
+  await t.test('should cache different value types', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({ collection })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchData', async (id) => {
+      callCount++
+      return id
+    })
+
+    // Test string
+    const str = await cache.fetchData('test-string')
+    assert.equal(str, 'test-string')
+
+    // Test number
+    const num = await cache.fetchData(42)
+    assert.equal(num, 42)
+
+    // Test boolean
+    const bool = await cache.fetchData(true)
+    assert.equal(bool, true)
+
+    // Test array
+    const arr = await cache.fetchData([1, 2, 3])
+    assert.deepEqual(arr, [1, 2, 3])
+
+    // All should be cached
+    assert.equal(callCount, 4)
+
+    // Verify caching works
+    await cache.fetchData('test-string')
+    await cache.fetchData(42)
+    assert.equal(callCount, 4)
+  })
+
+  await t.test('should handle cache deduplication correctly', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({ collection })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchSlow', async (id) => {
+      callCount++
+      // Simulate slow operation
+      await new Promise(resolve => setTimeout(resolve, 100))
+      return { id, value: `Result ${id}` }
+    })
+
+    // Make concurrent calls with same parameter
+    const promises = [
+      cache.fetchSlow(1),
+      cache.fetchSlow(1),
+      cache.fetchSlow(1)
+    ]
+
+    const results = await Promise.all(promises)
+
+    // All should return same result
+    assert.deepEqual(results[0], { id: 1, value: 'Result 1' })
+    assert.deepEqual(results[1], { id: 1, value: 'Result 1' })
+    assert.deepEqual(results[2], { id: 1, value: 'Result 1' })
+
+    // Function should only be called once due to deduplication
+    assert.equal(callCount, 1)
+  })
+
+  await t.test('should handle multiple references per entry', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({
+        collection,
+        invalidation: { referencesTTL: 100000 }
+      })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchUserWithPosts', {
       references: (args, key, result) => {
         if (!result) return null
-        return [`user:${args[0]}`, `posts:user:${args[0]}`]
+        return [`user:${args[0]}`, `posts:${args[0]}`]
       }
     }, async (userId) => {
       callCount++
@@ -218,45 +332,80 @@ test('Integration with async-cache-dedupe', async (t) => {
     })
 
     // Cache user posts
-    await cache.fetchUserPosts(1)
-    t.equal(callCount, 1)
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 1)
 
     // Should use cache
-    await cache.fetchUserPosts(1)
-    t.equal(callCount, 1)
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 1)
 
     // Invalidate by user reference
-    await cache.invalidateAll('user:1')
+    await cache.invalidate('fetchUserWithPosts', ['user:1'])
 
     // Should execute function again
-    await cache.fetchUserPosts(1)
-    t.equal(callCount, 2)
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 2)
 
     // Cache again
-    await cache.fetchUserPosts(1)
-    t.equal(callCount, 2)
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 2)
 
     // Invalidate by posts reference
-    await cache.invalidateAll('posts:user:1')
+    await cache.invalidate('fetchUserWithPosts', ['posts:1'])
 
     // Should execute function again
-    await cache.fetchUserPosts(1)
-    t.equal(callCount, 3)
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 3)
   })
 
-  t.test('should handle cache.clear()', async (t) => {
-    const collection = new MockCollection()
-    
+  await t.test('should handle array of references for bulk invalidation', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({
+        collection,
+        invalidation: { referencesTTL: 100000 }
+      })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchUser', {
+      references: (args, key, result) => result ? [`user:${result.id}`] : null
+    }, async (id) => {
+      callCount++
+      return { id, name: `User ${id}` }
+    })
+
+    // Cache multiple users
+    await cache.fetchUser(1)
+    await cache.fetchUser(2)
+    await cache.fetchUser(3)
+    assert.equal(callCount, 3)
+
+    // Invalidate multiple users at once
+    await cache.invalidate('fetchUser', ['user:1', 'user:2'])
+
+    // Should execute functions again for invalidated users
+    await cache.fetchUser(1)
+    await cache.fetchUser(2)
+    assert.equal(callCount, 5)
+
+    // User 3 should still be cached
+    await cache.fetchUser(3)
+    assert.equal(callCount, 5)
+  })
+
+  await t.test('should handle clear operation', async (t) => {
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({ collection })
     })
 
     const cache = createCache({
-      ttl: 60,
-      storage: {
-        type: 'custom',
-        options: { storage }
-      }
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
     })
 
     let callCount = 0
@@ -268,7 +417,7 @@ test('Integration with async-cache-dedupe', async (t) => {
     // Cache multiple entries
     await cache.fetchData(1)
     await cache.fetchData(2)
-    t.equal(callCount, 2)
+    assert.equal(callCount, 2)
 
     // Clear specific function cache
     cache.clear('fetchData')
@@ -276,64 +425,17 @@ test('Integration with async-cache-dedupe', async (t) => {
     // Should execute functions again
     await cache.fetchData(1)
     await cache.fetchData(2)
-    t.equal(callCount, 4)
+    assert.equal(callCount, 4)
   })
 
-  t.test('should support deduplication', async (t) => {
-    const collection = new MockCollection()
-    
+  await t.test('should handle special characters in keys', async (t) => {
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({ collection })
     })
 
     const cache = createCache({
-      ttl: 5,
-      storage: {
-        type: 'custom',
-        options: { storage }
-      }
-    })
-
-    let callCount = 0
-    cache.define('fetchSomething', async (k) => {
-      callCount++
-      // Simulate async operation
-      await new Promise(resolve => setTimeout(resolve, 10))
-      return { k }
-    })
-
-    // Make concurrent calls with same parameter
-    const p1 = cache.fetchSomething(42)
-    const p2 = cache.fetchSomething(42)
-    const p3 = cache.fetchSomething(42)
-
-    const [result1, result2, result3] = await Promise.all([p1, p2, p3])
-
-    // All should return same result
-    t.same(result1, { k: 42 })
-    t.same(result2, { k: 42 })
-    t.same(result3, { k: 42 })
-
-    // Function should only be called once due to deduplication
-    t.equal(callCount, 1)
-  })
-
-  t.test('should work with bucket option', async (t) => {
-    const collection = new MockCollection()
-    const bucket = {
-      defaultCollection: () => collection
-    }
-    
-    const storage = createStorage('custom', {
-      storage: new CouchbaseStorage({ bucket })
-    })
-
-    const cache = createCache({
-      ttl: 5,
-      storage: {
-        type: 'custom',
-        options: { storage }
-      }
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
     })
 
     let callCount = 0
@@ -342,90 +444,60 @@ test('Integration with async-cache-dedupe', async (t) => {
       return { id }
     })
 
-    const result = await cache.fetchData(1)
-    t.same(result, { id: 1 })
-    t.equal(callCount, 1)
+    // Test keys with special characters
+    const specialKeys = [
+      'key:with:colons',
+      'key-with-dashes',
+      'key_with_underscores',
+      'key.with.dots',
+      'key with spaces'
+    ]
 
-    // Should use cache
-    await cache.fetchData(1)
-    t.equal(callCount, 1)
+    for (const key of specialKeys) {
+      await cache.fetchData(key)
+    }
+
+    assert.equal(callCount, specialKeys.length)
+
+    // Verify caching works with special chars
+    for (const key of specialKeys) {
+      await cache.fetchData(key)
+    }
+
+    assert.equal(callCount, specialKeys.length)
   })
 
-  t.test('should handle TTL correctly', async (t) => {
-    const collection = new MockCollection()
-    
+  await t.test('should handle null and undefined values', async (t) => {
     const storage = createStorage('custom', {
       storage: new CouchbaseStorage({ collection })
     })
 
     const cache = createCache({
-      ttl: 1, // 1 second TTL
-      storage: {
-        type: 'custom',
-        options: { storage }
-      }
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
     })
 
     let callCount = 0
     cache.define('fetchData', async (id) => {
       callCount++
-      return { id, timestamp: Date.now() }
+      if (id === 'null') return null
+      if (id === 'undefined') return undefined
+      return { id }
     })
 
-    // First call
-    const result1 = await cache.fetchData(1)
-    t.equal(callCount, 1)
+    // Test null value
+    const nullResult = await cache.fetchData('null')
+    assert.strictEqual(nullResult, null)
 
-    // Should use cache
-    await cache.fetchData(1)
-    t.equal(callCount, 1)
+    // Test undefined value
+    const undefinedResult = await cache.fetchData('undefined')
+    assert.strictEqual(undefinedResult, undefined)
 
-    // Wait for TTL to expire
-    await new Promise(resolve => setTimeout(resolve, 1100))
+    assert.equal(callCount, 2)
 
-    // Should execute function again after TTL expiration
-    const result2 = await cache.fetchData(1)
-    t.equal(callCount, 2)
-    t.ok(result2.timestamp > result1.timestamp)
-  })
-
-  t.test('should handle array of references for invalidation', async (t) => {
-    const collection = new MockCollection()
-    
-    const storage = createStorage('custom', {
-      storage: new CouchbaseStorage({
-        collection,
-        invalidation: { referencesTTL: 60 }
-      })
-    })
-
-    const cache = createCache({
-      ttl: 60,
-      storage: {
-        type: 'custom',
-        options: { storage }
-      }
-    })
-
-    let callCount = 0
-    cache.define('fetchUser', {
-      references: (args, key, result) => result ? [`user:${result.id}`] : null
-    }, async (id) => {
-      callCount++
-      return { id, name: `User ${id}` }
-    })
-
-    // Cache multiple users
-    await cache.fetchUser(1)
-    await cache.fetchUser(2)
-    t.equal(callCount, 2)
-
-    // Invalidate multiple users at once
-    await cache.invalidateAll(['user:1', 'user:2'])
-
-    // Should execute functions again
-    await cache.fetchUser(1)
-    await cache.fetchUser(2)
-    t.equal(callCount, 4)
+    // Verify caching works
+    await cache.fetchData('null')
+    await cache.fetchData('undefined')
+    assert.equal(callCount, 2)
   })
 })

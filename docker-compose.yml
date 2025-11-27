@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  couchbase:
+    image: couchbase:community-7.6.0
+    container_name: couchbase-test
+    ports:
+      - "8091-8096:8091-8096"
+      - "11210:11210"
+    environment:
+      - CLUSTER_NAME=test-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/ui/index.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - couchbase-data:/opt/couchbase/var
+
+volumes:
+  couchbase-data:

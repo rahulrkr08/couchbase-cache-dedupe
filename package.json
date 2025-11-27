@@ -4,10 +4,17 @@
   "description": "Couchbase storage adapter for async-cache-dedupe",
   "main": "index.js",
   "scripts": {
-    "test": "tap",
-    "test:coverage": "tap --coverage-report=html",
+    "test": "borp",
+    "test:coverage": "borp --coverage",
+    "test:integration": "borp tests/integration.test.js",
     "lint": "standard",
-    "lint:fix": "standard --fix"
+    "lint:fix": "standard --fix",
+    "couchbase:start": "docker-compose up -d",
+    "couchbase:setup": "docker-compose exec couchbase /bin/bash -c 'cd /tmp && bash' < scripts/setup-couchbase.sh || docker exec couchbase-test bash /tmp/setup.sh",
+    "couchbase:init": "docker cp scripts/setup-couchbase.sh couchbase-test:/tmp/setup.sh && docker exec couchbase-test bash /tmp/setup.sh",
+    "couchbase:stop": "docker-compose down",
+    "couchbase:clean": "docker-compose down -v",
+    "couchbase:logs": "docker-compose logs -f couchbase"
   },
   "keywords": [
     "couchbase",
@@ -34,9 +41,9 @@
     "couchbase": "^4.0.0"
   },
   "devDependencies": {
+    "borp": "^0.18.0",
     "couchbase": "^4.0.0",
-    "standard": "^17.1.0",
-    "tap": "^18.0.0"
+    "standard": "^17.1.0"
   },
   "engines": {
     "node": ">=16"

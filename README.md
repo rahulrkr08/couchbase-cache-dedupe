@@ -12,6 +12,8 @@ Couchbase storage adapter for [async-cache-dedupe](https://github.com/mcollina/a
 - ✅ Reference-based cache invalidation
 - ✅ Wildcard pattern matching for bulk invalidation
 - ✅ Support for both Couchbase Collection and Bucket APIs
+- ✅ **Automatic key hashing for long keys** (handles Couchbase 250-byte key limit)
+- ✅ **Docker development environment included**
 - ✅ Comprehensive error handling and logging
 - ✅ 100% test coverage
 - ✅ Pure JavaScript implementation (no TypeScript compilation needed)
@@ -435,17 +437,81 @@ async function main() {
 main().catch(console.error)
 ```
 
+## Automatic Key Hashing
+
+Couchbase has a 250-byte limit on key length. This adapter **automatically handles this limitation** by hashing long keys using SHA-256:
+
+- Keys shorter than 200 bytes are stored as-is for better readability in Couchbase UI
+- Keys longer than 200 bytes are automatically hashed using SHA-256 (64-character hex string)
+- Hashing is completely transparent - you don't need to configure or manage it
+- The same key always produces the same hash, ensuring cache consistency
+
+**You don't need to do anything** - the adapter handles this automatically. This ensures your application works correctly even with very long cache keys, without any manual key management.
+
+## Development Setup
+
+This package includes a complete Docker-based development environment for Couchbase.
+
+### Starting Couchbase with Docker
+
+```bash
+# Start Couchbase container
+npm run couchbase:start
+
+# Initialize Couchbase (create bucket, scope, collection, authentication)
+npm run couchbase:init
+
+# View Couchbase logs
+npm run couchbase:logs
+
+# Stop Couchbase
+npm run couchbase:stop
+
+# Clean up (removes all data)
+npm run couchbase:clean
+```
+
+### Default Configuration
+
+The setup script creates the following:
+- **Host**: localhost:8091
+- **Username**: Administrator
+- **Password**: password
+- **Bucket**: test-bucket
+- **Scope**: test-scope
+- **Collection**: test-collection
+
+Access the Couchbase Web Console at http://localhost:8091
+
+### Custom Configuration
+
+You can customize the setup by setting environment variables:
+
+```bash
+CB_HOST=localhost \
+CB_PORT=8091 \
+CB_ADMIN=admin \
+CB_PASSWORD=mypassword \
+CB_BUCKET=my-bucket \
+CB_SCOPE=my-scope \
+CB_COLLECTION=my-collection \
+npm run couchbase:init
+```
+
 ## Testing
 
 Run the test suite:
 
 ```bash
+# Run unit tests (no Couchbase required)
 npm test
-```
 
-Run tests with coverage:
+# Run integration tests (requires Couchbase)
+npm run couchbase:start
+npm run couchbase:init
+npm run test:integration
 
-```bash
+# Run tests with coverage
 npm run test:coverage
 ```
 
@@ -454,8 +520,9 @@ The package includes comprehensive tests with 100% code coverage, covering:
 - TTL handling and expiration
 - Reference-based invalidation
 - Wildcard pattern matching
+- Key hashing for long keys
 - Error handling and edge cases
-- Integration with async-cache-dedupe
+- Integration with async-cache-dedupe and real Couchbase
 
 ## Error Handling
 
