@@ -1,6 +1,6 @@
 const { describe, it, beforeEach, afterEach, mock } = require('node:test')
 const assert = require('node:assert')
-const CouchbaseStorage = require('../lib/CouchbaseStorage')
+const CouchbaseStorage = require('../lib/storage')
 
 describe('CouchbaseStorage', () => {
   let storage
@@ -95,13 +95,13 @@ describe('CouchbaseStorage', () => {
       assert.strictEqual(mockCollection.get.mock.calls[0].arguments[0], 'v:test-key')
     })
 
-    it('should return null when key does not exist', async () => {
+    it('should return undefined when key does not exist', async () => {
       mockCollection.get.mock.mockImplementation(async () => {
         throw { name: 'DocumentNotFoundError' }
       })
 
       const result = await storage.get('non-existent')
-      assert.strictEqual(result, null)
+      assert.strictEqual(result, undefined)
     })
 
     it('should throw error for non-DocumentNotFoundError errors', async () => {
@@ -126,10 +126,9 @@ describe('CouchbaseStorage', () => {
       await storage.set('test-key', value, 60)
 
       assert.strictEqual(mockCollection.upsert.mock.calls.length, 1)
-      const [key, document, options] = mockCollection.upsert.mock.calls[0].arguments
+      const [key, storedValue, options] = mockCollection.upsert.mock.calls[0].arguments
       assert.strictEqual(key, 'v:test-key')
-      assert.strictEqual(document.value, value)
-      assert.deepStrictEqual(document.references, [])
+      assert.deepStrictEqual(storedValue, value)
       assert.strictEqual(options.expiry, 60)
     })
 
@@ -143,13 +142,13 @@ describe('CouchbaseStorage', () => {
 
       await storage.set('test-key', value, 60, references)
 
-      // Should store the main document + 2 reference documents
+      // Should store the main value + 2 reference documents
       assert.strictEqual(mockCollection.upsert.mock.calls.length, 3)
 
-      // Check main document
-      const [mainKey, mainDoc, mainOptions] = mockCollection.upsert.mock.calls[0].arguments
+      // Check main value is stored directly
+      const [mainKey, storedValue, mainOptions] = mockCollection.upsert.mock.calls[0].arguments
       assert.strictEqual(mainKey, 'v:test-key')
-      assert.deepStrictEqual(mainDoc.references, references)
+      assert.deepStrictEqual(storedValue, value)
       assert.strictEqual(mainOptions.expiry, 60)
 
       // Check reference documents
@@ -232,36 +231,15 @@ describe('CouchbaseStorage', () => {
       storage = new CouchbaseStorage({ collection: mockCollection })
     })
 
-    it('should remove document without references', async () => {
-      mockCollection.get.mock.mockImplementation(async () => ({
-        content: { value: 'test', references: [] }
-      }))
-
+    it('should remove document', async () => {
       await storage.remove('test-key')
 
       assert.strictEqual(mockCollection.remove.mock.calls.length, 1)
       assert.strictEqual(mockCollection.remove.mock.calls[0].arguments[0], 'v:test-key')
     })
 
-    it('should remove document with references', async () => {
-      mockCollection.get.mock.mockImplementation(async (key) => {
-        if (key === 'v:test-key') {
-          return { content: { value: 'test', references: ['user:1'] } }
-        }
-        if (key === 'r:user:1') {
-          return { content: { keys: ['test-key'] } }
-        }
-        throw { name: 'DocumentNotFoundError' }
-      })
-
-      await storage.remove('test-key')
-
-      // Should remove main document and reference document
-      assert.strictEqual(mockCollection.remove.mock.calls.length, 2)
-    })
-
     it('should handle non-existent key', async () => {
-      mockCollection.get.mock.mockImplementation(async () => {
+      mockCollection.remove.mock.mockImplementation(async () => {
         throw { name: 'DocumentNotFoundError' }
       })
 
@@ -269,32 +247,7 @@ describe('CouchbaseStorage', () => {
       // Should not throw
     })
 
-    it('should update reference document when multiple keys exist', async () => {
-      mockCollection.get.mock.mockImplementation(async (key) => {
-        if (key === 'v:test-key') {
-          return { content: { value: 'test', references: ['user:1'] } }
-        }
-        if (key === 'r:user:1') {
-          return { content: { keys: ['test-key', 'another-key'] } }
-        }
-        throw { name: 'DocumentNotFoundError' }
-      })
-
-      await storage.remove('test-key')
-
-      // Should update reference document, not remove it
-      const upsertCall = mockCollection.upsert.mock.calls.find(
-        call => call.arguments[0] === 'r:user:1'
-      )
-      assert(upsertCall)
-      assert.deepStrictEqual(upsertCall.arguments[1].keys, ['another-key'])
-    })
-
     it('should handle remove error that is not DocumentNotFoundError', async () => {
-      mockCollection.get.mock.mockImplementation(async () => ({
-        content: { value: 'test', references: [] }
-      }))
-
       mockCollection.remove.mock.mockImplementation(async () => {
         throw new Error('Connection error')
       })
@@ -726,14 +679,14 @@ describe('CouchbaseStorage', () => {
 
       // Get value
       const value = await storage.get('user-data')
-      assert.deepStrictEqual(value.value, { name: 'John' })
+      assert.deepStrictEqual(value, { name: 'John' })
 
       // Invalidate by reference
       await storage.invalidate('user:1')
 
       // Value should be removed
       const afterInvalidate = await storage.get('user-data')
-      assert.strictEqual(afterInvalidate, null)
+      assert.strictEqual(afterInvalidate, undefined)
     })
 
     it('should handle multiple keys with same reference', async () => {
@@ -770,23 +723,6 @@ describe('CouchbaseStorage', () => {
       // Both should be removed
       assert(!documents.has('v:key1'))
       assert(!documents.has('v:key2'))
-    })
-
-    it('should handle error when getting reference that throws non-DocumentNotFoundError during remove', async () => {
-      mockCollection.get.mock.mockImplementation(async (key) => {
-        if (key === 'v:test-key') {
-          return { content: { value: 'test', references: ['user:1'] } }
-        }
-        if (key === 'r:user:1') {
-          throw new Error('Connection error')
-        }
-        throw { name: 'DocumentNotFoundError' }
-      })
-
-      await assert.rejects(
-        () => storage.remove('test-key'),
-        /Connection error/
-      )
     })
   })
 })
