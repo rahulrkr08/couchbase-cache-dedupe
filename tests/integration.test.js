@@ -229,4 +229,275 @@ test('Integration with async-cache-dedupe', async (t) => {
     assert.deepEqual(result2, { id: longKey, data: `Data for ${longKey}` })
     assert.equal(callCount, 1, 'Should use cached value with automatically hashed key')
   })
+
+  await t.test('should cache different value types', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({ collection })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchData', async (id) => {
+      callCount++
+      return id
+    })
+
+    // Test string
+    const str = await cache.fetchData('test-string')
+    assert.equal(str, 'test-string')
+
+    // Test number
+    const num = await cache.fetchData(42)
+    assert.equal(num, 42)
+
+    // Test boolean
+    const bool = await cache.fetchData(true)
+    assert.equal(bool, true)
+
+    // Test array
+    const arr = await cache.fetchData([1, 2, 3])
+    assert.deepEqual(arr, [1, 2, 3])
+
+    // All should be cached
+    assert.equal(callCount, 4)
+
+    // Verify caching works
+    await cache.fetchData('test-string')
+    await cache.fetchData(42)
+    assert.equal(callCount, 4)
+  })
+
+  await t.test('should handle cache deduplication correctly', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({ collection })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchSlow', async (id) => {
+      callCount++
+      // Simulate slow operation
+      await new Promise(resolve => setTimeout(resolve, 100))
+      return { id, value: `Result ${id}` }
+    })
+
+    // Make concurrent calls with same parameter
+    const promises = [
+      cache.fetchSlow(1),
+      cache.fetchSlow(1),
+      cache.fetchSlow(1)
+    ]
+
+    const results = await Promise.all(promises)
+
+    // All should return same result
+    assert.deepEqual(results[0], { id: 1, value: 'Result 1' })
+    assert.deepEqual(results[1], { id: 1, value: 'Result 1' })
+    assert.deepEqual(results[2], { id: 1, value: 'Result 1' })
+
+    // Function should only be called once due to deduplication
+    assert.equal(callCount, 1)
+  })
+
+  await t.test('should handle multiple references per entry', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({
+        collection,
+        invalidation: { referencesTTL: 100000 }
+      })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchUserWithPosts', {
+      references: (args, key, result) => {
+        if (!result) return null
+        return [`user:${args[0]}`, `posts:${args[0]}`]
+      }
+    }, async (userId) => {
+      callCount++
+      return { userId, posts: [1, 2, 3] }
+    })
+
+    // Cache user posts
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 1)
+
+    // Should use cache
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 1)
+
+    // Invalidate by user reference
+    await cache.invalidate('fetchUserWithPosts', ['user:1'])
+
+    // Should execute function again
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 2)
+
+    // Cache again
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 2)
+
+    // Invalidate by posts reference
+    await cache.invalidate('fetchUserWithPosts', ['posts:1'])
+
+    // Should execute function again
+    await cache.fetchUserWithPosts(1)
+    assert.equal(callCount, 3)
+  })
+
+  await t.test('should handle array of references for bulk invalidation', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({
+        collection,
+        invalidation: { referencesTTL: 100000 }
+      })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchUser', {
+      references: (args, key, result) => result ? [`user:${result.id}`] : null
+    }, async (id) => {
+      callCount++
+      return { id, name: `User ${id}` }
+    })
+
+    // Cache multiple users
+    await cache.fetchUser(1)
+    await cache.fetchUser(2)
+    await cache.fetchUser(3)
+    assert.equal(callCount, 3)
+
+    // Invalidate multiple users at once
+    await cache.invalidate('fetchUser', ['user:1', 'user:2'])
+
+    // Should execute functions again for invalidated users
+    await cache.fetchUser(1)
+    await cache.fetchUser(2)
+    assert.equal(callCount, 5)
+
+    // User 3 should still be cached
+    await cache.fetchUser(3)
+    assert.equal(callCount, 5)
+  })
+
+  await t.test('should handle clear operation', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({ collection })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchData', async (id) => {
+      callCount++
+      return { id, data: `Data ${id}` }
+    })
+
+    // Cache multiple entries
+    await cache.fetchData(1)
+    await cache.fetchData(2)
+    assert.equal(callCount, 2)
+
+    // Clear specific function cache
+    cache.clear('fetchData')
+
+    // Should execute functions again
+    await cache.fetchData(1)
+    await cache.fetchData(2)
+    assert.equal(callCount, 4)
+  })
+
+  await t.test('should handle special characters in keys', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({ collection })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchData', async (id) => {
+      callCount++
+      return { id }
+    })
+
+    // Test keys with special characters
+    const specialKeys = [
+      'key:with:colons',
+      'key-with-dashes',
+      'key_with_underscores',
+      'key.with.dots',
+      'key with spaces'
+    ]
+
+    for (const key of specialKeys) {
+      await cache.fetchData(key)
+    }
+
+    assert.equal(callCount, specialKeys.length)
+
+    // Verify caching works with special chars
+    for (const key of specialKeys) {
+      await cache.fetchData(key)
+    }
+
+    assert.equal(callCount, specialKeys.length)
+  })
+
+  await t.test('should handle null and undefined values', async (t) => {
+    const storage = createStorage('custom', {
+      storage: new CouchbaseStorage({ collection })
+    })
+
+    const cache = createCache({
+      ttl: 100000,
+      storage: { type: 'custom', options: { storage } }
+    })
+
+    let callCount = 0
+    cache.define('fetchData', async (id) => {
+      callCount++
+      if (id === 'null') return null
+      if (id === 'undefined') return undefined
+      return { id }
+    })
+
+    // Test null value
+    const nullResult = await cache.fetchData('null')
+    assert.strictEqual(nullResult, null)
+
+    // Test undefined value
+    const undefinedResult = await cache.fetchData('undefined')
+    assert.strictEqual(undefinedResult, undefined)
+
+    assert.equal(callCount, 2)
+
+    // Verify caching works
+    await cache.fetchData('null')
+    await cache.fetchData('undefined')
+    assert.equal(callCount, 2)
+  })
 })

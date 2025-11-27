@@ -60,6 +60,13 @@ describe('CouchbaseStorage', () => {
       )
     })
 
+    it('should throw error if options is null', () => {
+      assert.throws(
+        () => new CouchbaseStorage(null),
+        /Cannot read property/
+      )
+    })
+
     it('should use provided collection directly', () => {
       storage = new CouchbaseStorage({ collection: mockCollection })
       assert.strictEqual(storage.collection, mockCollection)
@@ -75,6 +82,11 @@ describe('CouchbaseStorage', () => {
       storage = new CouchbaseStorage({ collection: mockCollection })
       assert.strictEqual(storage.referencesPrefix, 'r:')
       assert.strictEqual(storage.valuePrefix, 'v:')
+    })
+
+    it('should initialize with correct maxKeyLength', () => {
+      storage = new CouchbaseStorage({ collection: mockCollection })
+      assert.strictEqual(storage.maxKeyLength, 200)
     })
   })
 
@@ -113,6 +125,52 @@ describe('CouchbaseStorage', () => {
         () => storage.get('test-key'),
         /Connection error/
       )
+    })
+
+    it('should handle string values', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: 'simple string'
+      }))
+
+      const result = await storage.get('string-key')
+      assert.strictEqual(result, 'simple string')
+    })
+
+    it('should handle number values', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: 42
+      }))
+
+      const result = await storage.get('number-key')
+      assert.strictEqual(result, 42)
+    })
+
+    it('should handle boolean values', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: true
+      }))
+
+      const result = await storage.get('bool-key')
+      assert.strictEqual(result, true)
+    })
+
+    it('should handle array values', async () => {
+      const arrayValue = [1, 2, 3, 'test']
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: arrayValue
+      }))
+
+      const result = await storage.get('array-key')
+      assert.deepStrictEqual(result, arrayValue)
+    })
+
+    it('should handle null values', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: null
+      }))
+
+      const result = await storage.get('null-key')
+      assert.strictEqual(result, null)
     })
   })
 
@@ -161,6 +219,70 @@ describe('CouchbaseStorage', () => {
 
       const [, , options] = mockCollection.upsert.mock.calls[0].arguments
       assert.strictEqual(options.expiry, 0)
+    })
+
+    it('should handle negative TTL as zero', async () => {
+      await storage.set('test-key', { data: 'test' }, -10)
+
+      const [, , options] = mockCollection.upsert.mock.calls[0].arguments
+      assert.strictEqual(options.expiry, 0)
+    })
+
+    it('should store string values directly', async () => {
+      await storage.set('string-key', 'test string', 60)
+
+      const [, storedValue] = mockCollection.upsert.mock.calls[0].arguments
+      assert.strictEqual(storedValue, 'test string')
+    })
+
+    it('should store number values directly', async () => {
+      await storage.set('number-key', 123, 60)
+
+      const [, storedValue] = mockCollection.upsert.mock.calls[0].arguments
+      assert.strictEqual(storedValue, 123)
+    })
+
+    it('should store boolean values directly', async () => {
+      await storage.set('bool-key', false, 60)
+
+      const [, storedValue] = mockCollection.upsert.mock.calls[0].arguments
+      assert.strictEqual(storedValue, false)
+    })
+
+    it('should store array values directly', async () => {
+      const arrayValue = [1, 2, { nested: 'object' }]
+      await storage.set('array-key', arrayValue, 60)
+
+      const [, storedValue] = mockCollection.upsert.mock.calls[0].arguments
+      assert.deepStrictEqual(storedValue, arrayValue)
+    })
+
+    it('should handle null as value', async () => {
+      await storage.set('null-key', null, 60)
+
+      const [, storedValue] = mockCollection.upsert.mock.calls[0].arguments
+      assert.strictEqual(storedValue, null)
+    })
+
+    it('should handle empty string as key', async () => {
+      await storage.set('', { data: 'test' }, 60)
+
+      const [key] = mockCollection.upsert.mock.calls[0].arguments
+      assert.strictEqual(key, 'v:')
+    })
+
+    it('should handle empty references array', async () => {
+      await storage.set('test-key', { data: 'test' }, 60, [])
+
+      // Should only store main value, no reference documents
+      assert.strictEqual(mockCollection.upsert.mock.calls.length, 1)
+    })
+
+    it('should handle undefined references', async () => {
+      await storage.set('test-key', { data: 'test' }, 60, undefined)
+
+      // Should only store main value
+      assert.strictEqual(mockCollection.upsert.mock.calls.length, 1)
     })
 
     it('should update existing reference documents', async () => {
@@ -575,6 +697,132 @@ describe('CouchbaseStorage', () => {
       const result = await storage.exists('test-key')
 
       assert.strictEqual(result, false)
+    })
+
+    it('should check existence with prefixed key', async () => {
+      mockCollection.exists.mock.mockImplementation(async () => ({}))
+
+      await storage.exists('my-key')
+
+      assert.strictEqual(mockCollection.exists.mock.calls[0].arguments[0], 'v:my-key')
+    })
+  })
+
+  describe('clear', () => {
+    beforeEach(() => {
+      storage = new CouchbaseStorage({ collection: mockCollection })
+    })
+
+    it('should clear all cache entries using N1QL query', async () => {
+      mockCluster.query.mock.mockImplementation(async (query) => {
+        assert(query.includes('DELETE FROM'))
+        assert(query.includes("LIKE 'v:%'") || query.includes("LIKE 'r:%'"))
+        return {}
+      })
+
+      await storage.clear()
+
+      assert.strictEqual(mockCluster.query.mock.calls.length, 1)
+    })
+
+    it('should use default keyspace for default scope/collection', async () => {
+      mockScope.name = '_default'
+      mockCollection.name = '_default'
+
+      mockCluster.query.mock.mockImplementation(async (query) => {
+        assert(query.includes('`test-bucket`'))
+        assert(!query.includes('`_default`.`_default`'))
+        return {}
+      })
+
+      await storage.clear()
+    })
+
+    it('should use full keyspace path for custom scope/collection', async () => {
+      mockScope.name = 'custom-scope'
+      mockCollection.name = 'custom-collection'
+
+      mockCluster.query.mock.mockImplementation(async (query) => {
+        assert(query.includes('`test-bucket`.`custom-scope`.`custom-collection`'))
+        return {}
+      })
+
+      await storage.clear()
+    })
+
+    it('should throw error when query service unavailable', async () => {
+      mockCluster.query.mock.mockImplementation(async () => {
+        throw new Error('Query service not available')
+      })
+
+      await assert.rejects(
+        () => storage.clear(),
+        /Clear operation requires N1QL query service/
+      )
+    })
+  })
+
+  describe('refresh', () => {
+    beforeEach(() => {
+      storage = new CouchbaseStorage({ collection: mockCollection })
+    })
+
+    it('should refresh TTL for existing key', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: { ttl: 60 }
+      }))
+
+      await storage.refresh('test-key')
+
+      assert.strictEqual(mockCollection.touch.mock.calls.length, 1)
+      assert.strictEqual(mockCollection.touch.mock.calls[0].arguments[0], 'v:test-key')
+      assert.strictEqual(mockCollection.touch.mock.calls[0].arguments[1], 60)
+    })
+
+    it('should handle non-existent key gracefully', async () => {
+      mockCollection.get.mock.mockImplementation(async () => undefined)
+
+      await storage.refresh('non-existent')
+
+      assert.strictEqual(mockCollection.touch.mock.calls.length, 0)
+    })
+
+    it('should use default ttl of 0 when not specified', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: {}
+      }))
+
+      await storage.refresh('test-key')
+
+      assert.strictEqual(mockCollection.touch.mock.calls[0].arguments[1], 0)
+    })
+
+    it('should handle DocumentNotFoundError in touch', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: { ttl: 60 }
+      }))
+
+      mockCollection.touch.mock.mockImplementation(async () => {
+        throw { name: 'DocumentNotFoundError' }
+      })
+
+      await storage.refresh('test-key')
+      // Should not throw
+    })
+
+    it('should throw error for non-DocumentNotFoundError in touch', async () => {
+      mockCollection.get.mock.mockImplementation(async () => ({
+        content: { ttl: 60 }
+      }))
+
+      mockCollection.touch.mock.mockImplementation(async () => {
+        throw new Error('Connection error')
+      })
+
+      await assert.rejects(
+        () => storage.refresh('test-key'),
+        /Connection error/
+      )
     })
   })
 
