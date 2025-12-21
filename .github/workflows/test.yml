@@ -1,0 +1,76 @@
+name: Tests
+
+on:
+  push:
+    paths-ignore:
+      - '*.md'
+  pull_request:
+    paths-ignore:
+      - '*.md'
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test Node.js ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20, 22, 24]
+
+    services:
+      couchbase:
+        image: couchbase:community-7.6.0
+        ports:
+          - 8091:8091
+          - 8092:8092
+          - 8093:8093
+          - 8094:8094
+          - 8095:8095
+          - 8096:8096
+          - 11210:11210
+        options: >-
+          --health-cmd "curl -f http://localhost:8091/ui/index.html"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Couchbase
+        run: |
+          CONTAINER_ID=$(docker ps -q --filter ancestor=couchbase:community-7.6.0)
+          docker cp scripts/setup-couchbase.sh $CONTAINER_ID:/tmp/setup.sh
+          docker exec $CONTAINER_ID bash /tmp/setup.sh
+        env:
+          CB_HOST: localhost
+          CB_ADMIN: Administrator
+          CB_PASSWORD: password
+          CB_BUCKET: test-bucket
+          CB_SCOPE: test-scope
+          CB_COLLECTION: test-collection
+
+      - name: Run tests
+        run: npm test
+        env:
+          CB_HOST: localhost
+          CB_ADMIN: Administrator
+          CB_PASSWORD: password
+          CB_BUCKET: test-bucket
+          CB_SCOPE: test-scope
+          CB_COLLECTION: test-collection
+
+      - name: Run linter
+        run: npm run lint
