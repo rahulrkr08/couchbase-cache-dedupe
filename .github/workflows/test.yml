@@ -1,0 +1,136 @@
+name: Tests
+
+on:
+  push:
+    paths-ignore:
+      - '*.md'
+  pull_request:
+    paths-ignore:
+      - '*.md'
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test Node.js ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20, 22, 24]
+
+    services:
+      couchbase:
+        image: couchbase:community-7.6.0
+        ports:
+          - 8091:8091
+          - 8092:8092
+          - 8093:8093
+          - 8094:8094
+          - 8095:8095
+          - 8096:8096
+          - 11210:11210
+        options: >-
+          --health-cmd "curl -f http://localhost:8091/ui/index.html"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for Couchbase to be ready
+        run: |
+          echo "Waiting for Couchbase to be ready..."
+          max_attempts=60
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -s http://localhost:8091/ui/index.html > /dev/null 2>&1; then
+              echo "Couchbase is ready!"
+              break
+            fi
+            attempt=$((attempt + 1))
+            echo "Waiting... ($attempt/$max_attempts)"
+            sleep 1
+          done
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Error: Couchbase failed to start"
+            exit 1
+          fi
+
+      - name: Setup Couchbase
+        run: |
+          docker ps -a
+          docker exec $(docker ps -q --filter ancestor=couchbase:community-7.6.0) bash -c "
+            # Initialize the cluster
+            couchbase-cli cluster-init \
+              --cluster localhost:8091 \
+              --cluster-username Administrator \
+              --cluster-password password \
+              --services data,index,query \
+              --cluster-ramsize 512 \
+              --cluster-index-ramsize 256 \
+              --index-storage-setting default
+
+            # Wait for services
+            sleep 5
+
+            # Create bucket
+            couchbase-cli bucket-create \
+              --cluster localhost:8091 \
+              --username Administrator \
+              --password password \
+              --bucket test-bucket \
+              --bucket-type couchbase \
+              --bucket-ramsize 512 \
+              --enable-flush 1
+
+            # Wait for bucket
+            sleep 5
+
+            # Create scope
+            couchbase-cli collection-manage \
+              --cluster localhost:8091 \
+              --username Administrator \
+              --password password \
+              --bucket test-bucket \
+              --create-scope test-scope
+
+            sleep 2
+
+            # Create collection
+            couchbase-cli collection-manage \
+              --cluster localhost:8091 \
+              --username Administrator \
+              --password password \
+              --bucket test-bucket \
+              --create-collection test-scope.test-collection
+
+            # Wait for collection
+            sleep 3
+
+            # Create primary index
+            curl -u Administrator:password \
+              -X POST http://localhost:8093/query/service \
+              -d 'statement=CREATE PRIMARY INDEX ON \`test-bucket\`.\`test-scope\`.\`test-collection\`'
+
+            sleep 2
+
+            echo 'Couchbase setup completed!'
+          "
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run linter
+        run: npm run lint
