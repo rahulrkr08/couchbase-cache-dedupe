@@ -63,7 +63,7 @@ describe('CouchbaseStorage', () => {
     it('should throw error if options is null', () => {
       assert.throws(
         () => new CouchbaseStorage(null),
-        /Cannot read property/
+        /Cannot read propert(y|ies)/
       )
     })
 
@@ -538,14 +538,18 @@ describe('CouchbaseStorage', () => {
     })
 
     it('should refresh TTL for existing key', async () => {
+      const futureTime = Math.floor(Date.now() / 1000) + 60
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: { value: 'test', ttl: 60 }
+        content: { value: 'test' },
+        expiry: futureTime
       }))
 
       await storage.refresh('test-key')
 
       assert.strictEqual(mockCollection.touch.mock.calls.length, 1)
       assert.strictEqual(mockCollection.touch.mock.calls[0].arguments[0], 'v:test-key')
+      assert(mockCollection.touch.mock.calls[0].arguments[1] > 0)
+      assert(mockCollection.touch.mock.calls[0].arguments[1] <= 60)
     })
 
     it('should handle non-existent key', async () => {
@@ -559,8 +563,10 @@ describe('CouchbaseStorage', () => {
     })
 
     it('should handle touch DocumentNotFoundError', async () => {
+      const futureTime = Math.floor(Date.now() / 1000) + 60
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: { value: 'test', ttl: 60 }
+        content: { value: 'test' },
+        expiry: futureTime
       }))
 
       mockCollection.touch.mock.mockImplementation(async () => {
@@ -572,8 +578,10 @@ describe('CouchbaseStorage', () => {
     })
 
     it('should throw error for non-DocumentNotFoundError in touch', async () => {
+      const futureTime = Math.floor(Date.now() / 1000) + 60
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: { value: 'test', ttl: 60 }
+        content: { value: 'test' },
+        expiry: futureTime
       }))
 
       mockCollection.touch.mock.mockImplementation(async () => {
@@ -588,7 +596,8 @@ describe('CouchbaseStorage', () => {
 
     it('should use default ttl of 0 when not specified', async () => {
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: { value: 'test' }
+        content: { value: 'test' },
+        expiry: null
       }))
 
       await storage.refresh('test-key')
@@ -768,19 +777,24 @@ describe('CouchbaseStorage', () => {
     })
 
     it('should refresh TTL for existing key', async () => {
+      const futureTime = Math.floor(Date.now() / 1000) + 60
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: { ttl: 60 }
+        content: { value: 'test' },
+        expiry: futureTime
       }))
 
       await storage.refresh('test-key')
 
       assert.strictEqual(mockCollection.touch.mock.calls.length, 1)
       assert.strictEqual(mockCollection.touch.mock.calls[0].arguments[0], 'v:test-key')
-      assert.strictEqual(mockCollection.touch.mock.calls[0].arguments[1], 60)
+      assert(mockCollection.touch.mock.calls[0].arguments[1] > 0)
+      assert(mockCollection.touch.mock.calls[0].arguments[1] <= 60)
     })
 
     it('should handle non-existent key gracefully', async () => {
-      mockCollection.get.mock.mockImplementation(async () => undefined)
+      mockCollection.get.mock.mockImplementation(async () => {
+        throw { name: 'DocumentNotFoundError' }
+      })
 
       await storage.refresh('non-existent')
 
@@ -789,7 +803,8 @@ describe('CouchbaseStorage', () => {
 
     it('should use default ttl of 0 when not specified', async () => {
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: {}
+        content: {},
+        expiry: null
       }))
 
       await storage.refresh('test-key')
@@ -798,8 +813,10 @@ describe('CouchbaseStorage', () => {
     })
 
     it('should handle DocumentNotFoundError in touch', async () => {
+      const futureTime = Math.floor(Date.now() / 1000) + 60
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: { ttl: 60 }
+        content: { value: 'test' },
+        expiry: futureTime
       }))
 
       mockCollection.touch.mock.mockImplementation(async () => {
@@ -811,8 +828,10 @@ describe('CouchbaseStorage', () => {
     })
 
     it('should throw error for non-DocumentNotFoundError in touch', async () => {
+      const futureTime = Math.floor(Date.now() / 1000) + 60
       mockCollection.get.mock.mockImplementation(async () => ({
-        content: { ttl: 60 }
+        content: { value: 'test' },
+        expiry: futureTime
       }))
 
       mockCollection.touch.mock.mockImplementation(async () => {

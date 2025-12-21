@@ -35,7 +35,7 @@
   },
   "homepage": "https://github.com/yourusername/couchbase-cache-dedupe#readme",
   "dependencies": {
-    "async-cache-dedupe": "^2.2.0"
+    "async-cache-dedupe": "^3.4.0"
   },
   "peerDependencies": {
     "couchbase": "^4.0.0"

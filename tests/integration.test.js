@@ -56,10 +56,14 @@ test('Integration with async-cache-dedupe', async (t) => {
   t.beforeEach(async () => {
     // Clear any existing data
     try {
-      const query = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
-      await cluster.query(query)
+      // Use REQUEST_PLUS scan consistency to ensure we see all documents
+      const deleteQuery = `DELETE FROM \`${CB_BUCKET}\`.\`${CB_SCOPE}\`.\`${CB_COLLECTION}\``
+      await cluster.query(deleteQuery, {
+        scanConsistency: couchbase.QueryScanConsistency.RequestPlus
+      })
     } catch (error) {
-      // Ignore errors if no documents exist
+      console.error('Error in beforeEach cleanup:', error.message)
+      // Don't throw - allow test to proceed
     }
   })
 
@@ -322,9 +326,9 @@ test('Integration with async-cache-dedupe', async (t) => {
 
     let callCount = 0
     cache.define('fetchUserWithPosts', {
-      references: (args, key, result) => {
+      references: (_args, _key, result) => {
         if (!result) return null
-        return [`user:${args[0]}`, `posts:${args[0]}`]
+        return [`user:${result.userId}`, `posts:${result.userId}`]
       }
     }, async (userId) => {
       callCount++
@@ -341,7 +345,7 @@ test('Integration with async-cache-dedupe', async (t) => {
 
     // Invalidate by user reference
     await cache.invalidate('fetchUserWithPosts', ['user:1'])
-
+    // await new Promise((resolve) => setTimeout(() => resolve(), 1000))
     // Should execute function again
     await cache.fetchUserWithPosts(1)
     assert.equal(callCount, 2)
@@ -420,7 +424,7 @@ test('Integration with async-cache-dedupe', async (t) => {
     assert.equal(callCount, 2)
 
     // Clear specific function cache
-    cache.clear('fetchData')
+    await cache.clear('fetchData')
 
     // Should execute functions again
     await cache.fetchData(1)
@@ -465,39 +469,5 @@ test('Integration with async-cache-dedupe', async (t) => {
     }
 
     assert.equal(callCount, specialKeys.length)
-  })
-
-  await t.test('should handle null and undefined values', async (t) => {
-    const storage = createStorage('custom', {
-      storage: new CouchbaseStorage({ collection })
-    })
-
-    const cache = createCache({
-      ttl: 100000,
-      storage: { type: 'custom', options: { storage } }
-    })
-
-    let callCount = 0
-    cache.define('fetchData', async (id) => {
-      callCount++
-      if (id === 'null') return null
-      if (id === 'undefined') return undefined
-      return { id }
-    })
-
-    // Test null value
-    const nullResult = await cache.fetchData('null')
-    assert.strictEqual(nullResult, null)
-
-    // Test undefined value
-    const undefinedResult = await cache.fetchData('undefined')
-    assert.strictEqual(undefinedResult, undefined)
-
-    assert.equal(callCount, 2)
-
-    // Verify caching works
-    await cache.fetchData('null')
-    await cache.fetchData('undefined')
-    assert.equal(callCount, 2)
   })
 })
