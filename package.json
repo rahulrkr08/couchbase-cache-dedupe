@@ -1,6 +1,6 @@
 {
   "name": "couchbase-cache-dedupe",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Couchbase storage adapter for async-cache-dedupe",
   "main": "index.js",
   "scripts": {
@@ -24,16 +24,16 @@
     "adapter",
     "deduplication"
   ],
-  "author": "",
+  "author": "Rahul Radhakrishnan",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/couchbase-cache-dedupe.git"
+    "url": "https://github.com/rahulrkr08/couchbase-cache-dedupe.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/couchbase-cache-dedupe/issues"
+    "url": "https://github.com/rahulrkr08/couchbase-cache-dedupe/issues"
   },
-  "homepage": "https://github.com/yourusername/couchbase-cache-dedupe#readme",
+  "homepage": "https://github.com/rahulrkr08/couchbase-cache-dedupe#readme",
   "dependencies": {
     "async-cache-dedupe": "^3.4.0"
   },
