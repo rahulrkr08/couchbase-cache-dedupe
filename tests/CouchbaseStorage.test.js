@@ -36,7 +36,9 @@ describe('CouchbaseStorage', () => {
       name: '_default',
       scope: mockScope,
       get: mock.fn(async (key) => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       }),
       upsert: mock.fn(async () => ({})),
       remove: mock.fn(async () => ({})),
@@ -109,7 +111,9 @@ describe('CouchbaseStorage', () => {
 
     it('should return undefined when key does not exist', async () => {
       mockCollection.get.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       const result = await storage.get('non-existent')
@@ -195,7 +199,9 @@ describe('CouchbaseStorage', () => {
       const references = ['user:1', 'user:2']
 
       mockCollection.get.mock.mockImplementation(async (key) => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.set('test-key', value, 60, references)
@@ -291,7 +297,9 @@ describe('CouchbaseStorage', () => {
         if (key === 'r:user:1') {
           return { content: { keys: ['existing-key'] } }
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.set('test-key', { data: 'test' }, 60, references)
@@ -310,7 +318,9 @@ describe('CouchbaseStorage', () => {
         if (key === 'r:user:1') {
           return { content: { keys: ['test-key'] } }
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.set('test-key', { data: 'test' }, 60, references)
@@ -328,7 +338,9 @@ describe('CouchbaseStorage', () => {
         if (key === 'r:user:1') {
           throw new Error('Connection error')
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       // Mock console.error to suppress error output during test
@@ -362,7 +374,9 @@ describe('CouchbaseStorage', () => {
 
     it('should handle non-existent key', async () => {
       mockCollection.remove.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.remove('non-existent')
@@ -397,7 +411,9 @@ describe('CouchbaseStorage', () => {
         if (key.startsWith('r:user')) {
           return { content: { keys: [] } }
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.invalidate('user:1')
@@ -418,7 +434,9 @@ describe('CouchbaseStorage', () => {
         if (key.startsWith('v:')) {
           return { content: { value: 'test', references: [] } }
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.invalidate(['user:1', 'user:2'])
@@ -447,7 +465,9 @@ describe('CouchbaseStorage', () => {
         if (key.startsWith('v:')) {
           return { content: { value: 'test', references: [] } }
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.invalidate('user:*')
@@ -460,7 +480,9 @@ describe('CouchbaseStorage', () => {
 
     it('should handle non-existent reference', async () => {
       mockCollection.get.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.invalidate('non-existent')
@@ -554,7 +576,9 @@ describe('CouchbaseStorage', () => {
 
     it('should handle non-existent key', async () => {
       mockCollection.get.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.refresh('non-existent')
@@ -570,7 +594,9 @@ describe('CouchbaseStorage', () => {
       }))
 
       mockCollection.touch.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.refresh('test-key')
@@ -653,7 +679,9 @@ describe('CouchbaseStorage', () => {
 
     it('should return 0 for non-existent key', async () => {
       mockCollection.get.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       const ttl = await storage.getTTL('non-existent')
@@ -793,7 +821,9 @@ describe('CouchbaseStorage', () => {
 
     it('should handle non-existent key gracefully', async () => {
       mockCollection.get.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.refresh('non-existent')
@@ -820,7 +850,9 @@ describe('CouchbaseStorage', () => {
       }))
 
       mockCollection.touch.mock.mockImplementation(async () => {
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       await storage.refresh('test-key')
@@ -928,7 +960,9 @@ describe('CouchbaseStorage', () => {
         if (documents.has(key)) {
           return { content: documents.get(key) }
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       mockCollection.upsert.mock.mockImplementation(async (key, value) => {
@@ -963,7 +997,9 @@ describe('CouchbaseStorage', () => {
         if (documents.has(key)) {
           return { content: documents.get(key) }
         }
-        throw { name: 'DocumentNotFoundError' }
+        const error = new Error('Document not found')
+        error.name = 'DocumentNotFoundError'
+        throw error
       })
 
       mockCollection.upsert.mock.mockImplementation(async (key, value) => {
